@@ -1,0 +1,23 @@
+_target_: src.models.fm_module.FlowMatchingModule
+
+velocity_model: 
+  _target_: src.models.flow_matching.flow_matching.VelocityModel
+
+  net: 
+    _target_: src.models.flow_matching.UNet.UNet 
+
+    in_ch: 1
+    t_emb_dim: 256
+    base_channel: 32
+    multiplier: [1, 2, 4, 4]
+    use_attention: True
+
+optimizer:
+  _target_: torch.optim.Adam 
+  
+  _partial_: True
+  lr: 1e-5
+
+vae_path: /mnt/apple/k66/hanh/thesis/logs/train/runs/2025-10-18_00-20-52/vae-thesis/h1wy1nz9/checkpoints/epoch=249-step=209000.ckpt
+w: 4.0 
+num_steps: 200 

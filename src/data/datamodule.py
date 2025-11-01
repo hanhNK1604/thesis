@@ -4,7 +4,8 @@ from torch.utils.data import DataLoader, Dataset, random_split
 import rootutils 
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True) 
-# from src.data.dataset.isicvaedataset import ISICVAEDataset
+from src.data.dataset.isicvaedataset import ISICVAEDataset
+from src.data.dataset.isicvaemaskdataset import ISICVAEMaskDataset
 
 class Datamodule(LightningDataModule): 
     def __init__(
@@ -40,7 +41,7 @@ class Datamodule(LightningDataModule):
         return DataLoader(self.data_val, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, pin_memory=self.pin_memory)
     
 # data_dir = "/home/ubuntu/thesis/data" 
-# data_set = ISICVAEDataset(image_size=256, data_dir=data_dir) 
+# data_set = ISICVAEMaskDataset(image_size=256, data_dir=data_dir) 
 
 # data_module = Datamodule(dataset=data_set, train_val_test_split=[3344, 100, 250], batch_size=32, num_workers=2, pin_memory=False)
 # data_module.setup()

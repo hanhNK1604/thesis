@@ -50,13 +50,15 @@ class KLVAEModel(nn.Module):
 
         return res_image, {'kld_loss': kld_loss} 
 
-# encoder = Encoder(in_ch=3, double_latent=True)
-# decoder = Decoder(out_ch=3)
+# encoder = Encoder(in_ch=1, double_latent=True)
+# decoder = Decoder(out_ch=1)
 
 # net = KLVAEModel(encoder, decoder)
-# a = torch.rand((1, 3, 256, 256))
-
+# a = torch.rand((1, 1, 256, 256))
+# b = torch.rand((1, 3, 64, 64)) 
 # res_image, kld_loss = net(a) 
+# print(net.encode(a)[0].shape)
+# print(net.decode(b).shape)
 # print(res_image.shape) 
 # print(kld_loss)
 
