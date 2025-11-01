@@ -20,6 +20,6 @@ optimizer:
   lr: 1e-5
 
 w: 4.0 
-num_steps: 200 
-vae_mask_path: /checkpoints/vae_mask/epoch=24-step=20900.ckpt
-vae_image_path: /checkpoints/vae/epoch=249-step=209000.ckpt
+num_steps: 100
+vae_mask_path: ${checkpoints_dir}/vae_mask/epoch=99-step=83600.ckpt
+vae_image_path: ${checkpoints_dir}/vae_image/epoch=249-step=209000.ckpt

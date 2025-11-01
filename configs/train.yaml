@@ -4,8 +4,8 @@
 # order of defaults determines the order in which configs override each other
 defaults:
   - _self_
-  - data: isic_mask
-  - model: vae_module_mask
+  - data: isic_fm
+  - model: fm_latent_module
   - callbacks: null
   - logger: wandb # set logger here or use command line (e.g. `python train.py logger=tensorboard`)
   - trainer: default

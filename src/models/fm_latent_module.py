@@ -86,8 +86,8 @@ class FlowMatchingLatentModule(L.LightningModule):
     def step(self, batch): 
         image, mask = batch 
 
-        z_image, _ = self.vae_image_model.encode(image)
-        z_mask, _ = self.vae_mask_model.encode(mask) 
+        z_image, _ = self.vae_image_module.vae_model.encode(image)
+        z_mask, _ = self.vae_mask_module.vae_model.encode(mask)
 
         t = torch.rand(size=(z_mask.shape[0],), device=z_mask.device) 
         noise = torch.randn_like(z_mask, device=z_mask.device) 
@@ -104,28 +104,25 @@ class FlowMatchingLatentModule(L.LightningModule):
             velocity = self.forward(x=z_t, t=t, c=None) 
 
         loss = self.mse_loss(velocity, dz_t)
-        return loss
+        return loss, z_image, z_mask
 
     def training_step(self, batch, batch_index): 
-        loss = self.step(batch=batch) 
+        loss, z_image, z_mask = self.step(batch=batch) 
         self.log('train/loss', loss, prog_bar=True, on_step=False, on_epoch=True) 
         return loss
 
     def validation_step(self, batch, batch_index): 
-        loss = self.step(batch=batch) 
+        loss, z_image, z_mask = self.step(batch=batch) 
         self.log('val/loss', loss, prog_bar=True, on_step=False, on_epoch=True) 
 
-        image, mask = batch 
-
-        z_image, _ = self.vae_image_model.encode(image) 
-        z_mask, _ = self.vae_mask_model.encode(mask) 
+        image, mask = batch  
 
         mask_pred = self.sample(input_size=z_mask.shape, z_image=z_image) 
         mask = (mask > 0.5).long()
         iou = self.iou(mask_pred, mask.long()) 
         self.log('val/iou', iou, prog_bar=True, on_step=False, on_epoch=True)
 
-        if batch_index == 4: 
+        if batch_index == 16: 
             labels = make_grid(mask.float(), nrow=2) 
             pred = make_grid(mask_pred.float(), nrow=2) 
             image = self.rescale(image) 
@@ -135,13 +132,8 @@ class FlowMatchingLatentModule(L.LightningModule):
             self.logger.log_image(images=[pred], key='val/mask_pred') 
     
     def test_step(self, batch, batch_index): 
-        loss = self.step(batch=batch) 
+        loss, z_image, z_mask = self.step(batch=batch) 
         self.log('test/loss', loss, prog_bar=True, on_step=False, on_epoch=True) 
-
-        image, mask = batch 
-
-        z_image, _ = self.vae_image_model.encode(image) 
-        z_mask, _ = self.vae_mask_model.encode(mask) 
 
         mask_pred = self.sample(input_size=z_mask.shape, z_image=z_image) 
         mask = (mask > 0.5).long()
