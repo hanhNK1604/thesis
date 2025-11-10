@@ -19,7 +19,7 @@ optimizer:
   _partial_: True
   lr: 1e-5
 
-w: 4.0 
+w: 3.0 
 num_steps: 100
 vae_mask_path: ${checkpoints_dir}/vae_mask/epoch=99-step=83600.ckpt
 vae_image_path: ${checkpoints_dir}/vae_image/epoch=249-step=209000.ckpt

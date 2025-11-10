@@ -57,11 +57,9 @@ class FlowMatchingLatentModule(L.LightningModule):
 
         self.vae_image_module = VAEModule.load_from_checkpoint(vae_image_path)
         self.vae_image_module.eval().freeze() 
-        self.vae_image_model = self.vae_image_module.vae_model
-
+    
         self.vae_mask_module = VAEMaskModule.load_from_checkpoint(vae_mask_path)
         self.vae_mask_module.eval().freeze() 
-        self.vae_mask_model = self.vae_mask_module.vae_model
 
         
     def forward(self, x, t, c=None): 
@@ -74,7 +72,7 @@ class FlowMatchingLatentModule(L.LightningModule):
         extras = {"c": z_image} 
         z_mask_predict = self.solver.sample(x_init=noise, step_size=1.0/self.num_steps, method="midpoint", **extras) 
     
-        mask = self.vae_mask_model.decode(z_mask_predict)
+        mask = self.vae_mask_module.vae_model.decode(z_mask_predict)
         mask = torch.sigmoid(mask) 
         mask_predict = (mask > 0.5).long() 
 
@@ -116,17 +114,20 @@ class FlowMatchingLatentModule(L.LightningModule):
         self.log('val/loss', loss, prog_bar=True, on_step=False, on_epoch=True) 
 
         image, mask = batch  
-
+        
         mask_pred = self.sample(input_size=z_mask.shape, z_image=z_image) 
         mask = (mask > 0.5).long()
         iou = self.iou(mask_pred, mask.long()) 
         self.log('val/iou', iou, prog_bar=True, on_step=False, on_epoch=True)
 
         if batch_index == 16: 
+            mask_vae = (torch.sigmoid(self.vae_mask_module.vae_model.decode(z_mask)) > 0.5).long() 
+            mask_vae = make_grid(mask_vae.float(), nrow=2)
             labels = make_grid(mask.float(), nrow=2) 
             pred = make_grid(mask_pred.float(), nrow=2) 
             image = self.rescale(image) 
             image = make_grid(image, nrow=2)
+            self.logger.log_image(images=[mask_vae], key='val/mask_vae')
             self.logger.log_image(images=[image], key='val/image')
             self.logger.log_image(images=[labels], key='val/mask')
             self.logger.log_image(images=[pred], key='val/mask_pred') 
@@ -134,11 +135,24 @@ class FlowMatchingLatentModule(L.LightningModule):
     def test_step(self, batch, batch_index): 
         loss, z_image, z_mask = self.step(batch=batch) 
         self.log('test/loss', loss, prog_bar=True, on_step=False, on_epoch=True) 
-
+        image, mask = batch 
         mask_pred = self.sample(input_size=z_mask.shape, z_image=z_image) 
         mask = (mask > 0.5).long()
         iou = self.iou(mask_pred, mask.long()) 
         self.log('test/iou', iou, prog_bar=True, on_step=False, on_epoch=True)
+        if batch_index == 16: 
+            mask_vae = (torch.sigmoid(self.vae_mask_module.vae_model.decode(z_mask)) > 0.5).long() 
+            mask_vae = make_grid(mask_vae.float(), nrow=2)
+            labels = make_grid(mask.float(), nrow=2) 
+            pred = make_grid(mask_pred.float(), nrow=2) 
+            image = self.rescale(image) 
+            image = make_grid(image, nrow=2)
+            self.logger.log_image(images=[mask_vae], key='test/mask_vae')
+            self.logger.log_image(images=[image], key='test/image')
+            self.logger.log_image(images=[labels], key='test/mask')
+            self.logger.log_image(images=[pred], key='test/mask_pred') 
+
+    
 
 
     def configure_optimizers(self):
