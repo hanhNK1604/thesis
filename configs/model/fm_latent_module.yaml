@@ -6,7 +6,7 @@ velocity_model:
   net: 
     _target_: src.models.flow_matching.UNet.UNet 
 
-    in_ch: 1
+    in_ch: 3
     t_emb_dim: 256
     base_channel: 64
     multiplier: [1, 2, 2, 4]

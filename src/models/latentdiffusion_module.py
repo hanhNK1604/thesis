@@ -3,10 +3,10 @@ rootutils.setup_root(search_from=__file__, indicator='.project-root', pythonpath
 
 import torch 
 from torch import nn 
-import lightning as L 
+import pytorch_lightning as L
 from torchvision.utils import make_grid 
 
-from src.models.diffusion.DDIM import DDIMSampler, DDPMSampler
+from src.models.diffusion.DDIM import DDIMSampler 
 from src.models.diffusion.LatentDiffusion import LatentDiffusion 
 
 from torchmetrics.classification import BinaryJaccardIndex  
@@ -16,7 +16,7 @@ class LatentDiffusionModule(L.LightningModule):
         self, 
         diffusion_model: LatentDiffusion, 
         optimizer, 
-        sampler: DDPMSampler, 
+        sampler: DDIMSampler, 
     ): 
         super(LatentDiffusionModule, self).__init__() 
 
@@ -48,7 +48,7 @@ class LatentDiffusionModule(L.LightningModule):
         self.sampler.denoise_net = self.diffusion_model.denoise_net  
         z_image = self.diffusion_model.encode_image(image)
 
-        z_fake = self.sampler.reverse_process(c=z_image, batch_size=z_image.shape[0]) 
+        z_fake = self.sampler.reverse_process_condition(c=z_image, batch_size=z_image.shape[0]) 
 
         mask_pred = self.diffusion_model.decode_mask(z_fake) 
 
@@ -56,9 +56,6 @@ class LatentDiffusionModule(L.LightningModule):
         self.log('val/iou', iou, prog_bar=True, on_step=False, on_epoch=True) 
 
         if batch_index == 16: 
-            mask_encode = self.diffusion_model.encode_mask(mask) 
-            mask_vae = self.diffusion_model.decode_mask(mask_encode)
-            mask_vae = make_grid(mask_vae, nrow=2) 
             image = make_grid(self.diffusion_model.rescale(image), nrow=2) 
             mask = make_grid((mask > 0.5).long(), nrow=2) 
             mask_pred = make_grid(mask_pred, nrow=2) 
@@ -66,7 +63,6 @@ class LatentDiffusionModule(L.LightningModule):
             self.logger.log_image(images=[image], key="val/image") 
             self.logger.log_image(images=[mask], key="val/mask") 
             self.logger.log_image(images=[mask_pred], key="val/mask_pred")
-            self.logger.log_image(images=[mask_vae], key="val/mask_vae")
     
     def test_step(self, batch, batch_index): 
         image, mask = batch 
@@ -77,7 +73,7 @@ class LatentDiffusionModule(L.LightningModule):
         self.sampler.denoise_net = self.diffusion_model.denoise_net  
         z_image = self.diffusion_model.encode_image(image)
 
-        z_fake = self.sampler.reverse_process(c=z_image, batch_size=z_image.shape[0]) 
+        z_fake = self.sampler.reverse_process_condition(c=z_image, batch_size=z_image.shape[0]) 
 
         mask_pred = self.diffusion_model.decode_mask(z_fake) 
 
@@ -85,9 +81,6 @@ class LatentDiffusionModule(L.LightningModule):
         self.log('test/iou', iou, prog_bar=True, on_step=False, on_epoch=True) 
 
         if batch_index == 16: 
-            mask_encode = self.diffusion_model.encode_mask(mask) 
-            mask_vae = self.diffusion_model.decode_mask(mask_encode)
-            mask_vae = make_grid(mask_vae, nrow=2) 
             image = make_grid(self.diffusion_model.rescale(image), nrow=2) 
             mask = make_grid((mask > 0.5).long(), nrow=2) 
             mask_pred = make_grid(mask_pred, nrow=2) 
@@ -95,7 +88,6 @@ class LatentDiffusionModule(L.LightningModule):
             self.logger.log_image(images=[image], key="test/image") 
             self.logger.log_image(images=[mask], key="test/mask") 
             self.logger.log_image(images=[mask_pred], key="test/mask_pred")
-            self.logger.log_image(images=[mask_vae], key="test/mask_vae")
 
     def configure_optimizers(self):
         return self.optimizer(params=self.parameters())

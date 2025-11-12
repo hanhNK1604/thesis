@@ -5,7 +5,7 @@
 defaults:
   - _self_
   - data: isic_fm
-  - model: fm_latent_module
+  - model: diffusion_latent_module
   - callbacks: null
   - logger: wandb # set logger here or use command line (e.g. `python train.py logger=tensorboard`)
   - trainer: default
