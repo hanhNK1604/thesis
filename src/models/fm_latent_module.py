@@ -1,102 +1,186 @@
 import rootutils 
-rootutils.setup_root(search_from=__file__, indicator='.project-root', pythonpath=True) 
+rootutils.setup_root(search_from=__file__, indicator='.project-root', pythonpath=True)  
 
-import torch 
-from torch import nn 
+import torch
 import lightning as L 
-from torchvision.utils import make_grid 
+from torch import nn, optim 
+import torchmetrics 
+from torchmetrics.classification import BinaryJaccardIndex
 
-from src.models.diffusion.DDIM import DDIMSampler, DDPMSampler
-from src.models.diffusion.LatentDiffusion import LatentDiffusion 
 
-from torchmetrics.classification import BinaryJaccardIndex  
+from torch.optim import Optimizer
+from torchvision.utils import make_grid
 
-class LatentDiffusionModule(L.LightningModule): 
-    def __init__(
-        self, 
-        diffusion_model: LatentDiffusion, 
-        optimizer, 
-        sampler: DDPMSampler, 
+from flow_matching.solver import ODESolver 
+from flow_matching.path import CondOTProbPath 
+from flow_matching.utils.model_wrapper import ModelWrapper 
+
+from src.models.flow_matching.flow_matching import VelocityModel 
+from src.models.vae_module import VAEModule
+from src.models.vae_mask_module import VAEMaskModule
+
+
+class FlowLatent(ModelWrapper): 
+    def __init__(self, net: nn.Module, w: float=4.0): 
+        super(FlowLatent, self).__init__(model=net) 
+        self.w = w 
+
+    def forward(self, x, t, **extras):
+        c = extras.get("c") 
+        return (1 - self.w) * self.model.forward(x=x, t=t, c=None) + self.w * self.model.forward(x=x, t=t, c=c) 
+            
+class FlowMatchingLatentModule(L.LightningModule): 
+    def __init__(self, 
+        num_steps:int, 
+        velocity_model: VelocityModel, 
+        optimizer: Optimizer, 
+        w: float = 4.0, 
+        vae_mask_path: str = "dir",
+        vae_image_path: str = "dir" 
     ): 
-        super(LatentDiffusionModule, self).__init__() 
-
+        super(FlowMatchingLatentModule, self).__init__()  
         self.save_hyperparameters(logger=False)
-
-        self.diffusion_model = diffusion_model 
+        self.num_steps = num_steps
+        self.velocity_model = velocity_model
         self.optimizer = optimizer 
-        self.sampler = sampler 
+        self.w = w 
+
+        self.mse_loss = nn.MSELoss() 
+
+        self.model_wrapper = FlowLatent(net=self.velocity_model, w=self.w) 
+        self.solver = ODESolver(velocity_model=self.model_wrapper)
+        self.path = CondOTProbPath()
+
         self.iou = BinaryJaccardIndex()
-        self.loss_fn = nn.MSELoss() 
+        self.mean = torch.tensor([0.5, 0.5, 0.5]).unsqueeze(1).unsqueeze(2)
+        self.std = torch.tensor([0.5, 0.5, 0.5]).unsqueeze(1).unsqueeze(2)
+
+        self.vae_image_module = VAEModule.load_from_checkpoint(vae_image_path)
+        self.vae_image_module.eval().freeze() 
+    
+        self.vae_mask_module = VAEMaskModule.load_from_checkpoint(vae_mask_path)
+        self.vae_mask_module.eval().freeze() 
+
         
+    def forward(self, x, t, c=None): 
+        velocity = self.velocity_model.forward(x=x, t=t, c=c) 
+        return velocity 
 
-    def forward(self, batch): 
-        pred_noise, noise = self.diffusion_model.forward(batch) 
-        return pred_noise, noise 
+    def sample(self, input_size: torch.Size, z_image):
 
-    def training_step(self, batch, batch_index):
-        pred_noise, noise = self.forward(batch) 
-        loss = self.loss_fn(pred_noise, noise)
-        self.log('train/loss', loss, prog_bar=True, on_step=False, on_epoch=True)
-        return loss 
+        noise = torch.randn(size=input_size, device="cuda") 
+        extras = {"c": z_image} 
+        z_mask_predict = self.solver.sample(x_init=noise, step_size=1.0/self.num_steps, method="dopri5", **extras) 
+    
+        mask = self.vae_mask_module.vae_model.decode(z_mask_predict)
+        mask = torch.sigmoid(mask) 
+        mask_predict = (mask > 0.5).long() 
+
+        return mask_predict 
+
+    def rescale(self, image):
+        return image * self.std.to(image.device) + self.mean.to(image.device) 
+        
+    def step(self, batch): 
+        image, mask = batch 
+
+        z_image, _ = self.vae_image_module.vae_model.encode(image)
+        z_mask, _ = self.vae_mask_module.vae_model.encode(mask)
+
+        t = torch.rand(size=(z_mask.shape[0],), device=z_mask.device) 
+        noise = torch.randn_like(z_mask, device=z_mask.device) 
+
+        path_sample = self.path.sample(x_0=noise, x_1=z_mask, t=t) 
+        z_t = path_sample.x_t.to(z_mask.device) 
+        dz_t = path_sample.dx_t.to(z_mask.device) 
+
+        velocity = None 
+        rand_value = torch.rand(size=(1,)) 
+        if rand_value[0] > 0.5: 
+            velocity = self.forward(x=z_t, t=t, c=z_image) 
+        else: 
+            velocity = self.forward(x=z_t, t=t, c=None) 
+
+        loss = self.mse_loss(velocity, dz_t)
+        return loss, z_image, z_mask
+
+    def training_step(self, batch, batch_index): 
+        loss, z_image, z_mask = self.step(batch=batch) 
+        self.log('train/loss', loss, prog_bar=True, on_step=False, on_epoch=True) 
+        return loss
 
     def validation_step(self, batch, batch_index): 
-        image, mask = batch 
-        pred_noise, noise = self.forward(batch) 
-        loss = self.loss_fn(pred_noise, noise)
-        self.log('val/loss', loss, prog_bar=True, on_step=False, on_epoch=True)
+        loss, z_image, z_mask = self.step(batch=batch) 
+        self.log('val/loss', loss, prog_bar=True, on_step=False, on_epoch=True) 
 
-        self.sampler.denoise_net = self.diffusion_model.denoise_net  
-        z_image = self.diffusion_model.encode_image(image)
+        image, mask = batch  
+        
+        mask_pred = self.sample(input_size=z_mask.shape, z_image=z_image) 
+        mask = (mask > 0.5).long()
+        iou = self.iou(mask_pred, mask.long()) 
+        self.log('val/iou', iou, prog_bar=True, on_step=False, on_epoch=True)
 
-        z_fake = self.sampler.reverse_process(c=z_image, batch_size=z_image.shape[0]) 
+        mask_pred_n = self.sample_n(z_image=z_image, n=5) 
+        iou_n = self.iou(mask_pred_n, mask.long()) 
+        self.log('val/iou_n', iou_n, prog_bar=True, on_step=False, on_epoch=True)
 
-        mask_pred = self.diffusion_model.decode_mask(z_fake) 
 
-        iou = self.iou(mask_pred, (mask > 0.5).long())
-        self.log('val/iou', iou, prog_bar=True, on_step=False, on_epoch=True) 
+        if batch_index == 4: 
+            mask_vae = (torch.sigmoid(self.vae_mask_module.vae_model.decode(z_mask)) > 0.5).long() 
+            mask_vae = make_grid(mask_vae.float(), nrow=2)
+            labels = make_grid(mask.float(), nrow=2) 
+            pred = make_grid(mask_pred.float(), nrow=2) 
+            pred_n = make_grid(mask_pred_n.float(), nrow=2) 
+            image = self.rescale(image) 
+            image = make_grid(image, nrow=2)
+            self.logger.log_image(images=[mask_vae], key='val/mask_vae')
+            self.logger.log_image(images=[image], key='val/image')
+            self.logger.log_image(images=[labels], key='val/mask')
+            self.logger.log_image(images=[pred], key='val/mask_pred') 
+            self.logger.log_image(images=[pred_n], key='val/mask_pred_n') 
+        
+    def sample_n(self, z_image, n=5): 
+        samples = [] 
+        for i in range(n): 
+            sample_ = self.sample(input_size=z_image.shape, z_image=z_image) 
+            samples.append(torch.unsqueeze(sample_, dim=0)) 
+        
+        res = torch.cat(samples, dim=0) 
+        res = torch.mean(res.float(), dim=0)
+        res = (res > 0.5).long() 
+        return res  
 
-        if batch_index == 16: 
-            mask_encode = self.diffusion_model.encode_mask(mask) 
-            mask_vae = self.diffusion_model.decode_mask(mask_encode)
-            mask_vae = make_grid(mask_vae, nrow=2) 
-            image = make_grid(self.diffusion_model.rescale(image), nrow=2) 
-            mask = make_grid((mask > 0.5).long(), nrow=2) 
-            mask_pred = make_grid(mask_pred, nrow=2) 
-
-            self.logger.log_image(images=[image], key="val/image") 
-            self.logger.log_image(images=[mask], key="val/mask") 
-            self.logger.log_image(images=[mask_pred], key="val/mask_pred")
-            self.logger.log_image(images=[mask_vae], key="val/mask_vae")
     
     def test_step(self, batch, batch_index): 
-        image, mask = batch 
-        pred_noise, noise = self.forward(batch) 
-        loss = self.loss_fn(pred_noise, noise)
-        self.log('test/loss', loss, prog_bar=True, on_step=False, on_epoch=True)
+        loss, z_image, z_mask = self.step(batch=batch) 
+        self.log('test/loss', loss, prog_bar=True, on_step=False, on_epoch=True) 
 
-        self.sampler.denoise_net = self.diffusion_model.denoise_net  
-        z_image = self.diffusion_model.encode_image(image)
+        image, mask = batch  
+        
+        mask_pred = self.sample(input_size=z_mask.shape, z_image=z_image) 
+        mask = (mask > 0.5).long()
+        iou = self.iou(mask_pred, mask.long()) 
+        self.log('test/iou', iou, prog_bar=True, on_step=False, on_epoch=True)
 
-        z_fake = self.sampler.reverse_process(c=z_image, batch_size=z_image.shape[0]) 
+        mask_pred_n = self.sample_n(z_image=z_image, n=5) 
+        iou_n = self.iou(mask_pred_n, mask.long()) 
+        self.log('test/iou_n', iou_n, prog_bar=True, on_step=False, on_epoch=True)
 
-        mask_pred = self.diffusion_model.decode_mask(z_fake) 
 
-        iou = self.iou(mask_pred, (mask > 0.5).long())
-        self.log('test/iou', iou, prog_bar=True, on_step=False, on_epoch=True) 
+        if batch_index == 4: 
+            mask_vae = (torch.sigmoid(self.vae_mask_module.vae_model.decode(z_mask)) > 0.5).long() 
+            mask_vae = make_grid(mask_vae.float(), nrow=2)
+            labels = make_grid(mask.float(), nrow=2) 
+            pred = make_grid(mask_pred.float(), nrow=2) 
+            pred_n = make_grid(mask_pred_n.float(), nrow=2) 
+            image = self.rescale(image) 
+            image = make_grid(image, nrow=2)
+            self.logger.log_image(images=[mask_vae], key='test/mask_vae')
+            self.logger.log_image(images=[image], key='test/image')
+            self.logger.log_image(images=[labels], key='test/mask')
+            self.logger.log_image(images=[pred], key='test/mask_pred') 
+            self.logger.log_image(images=[pred_n], key='test/mask_pred_n') 
 
-        if batch_index == 16: 
-            mask_encode = self.diffusion_model.encode_mask(mask) 
-            mask_vae = self.diffusion_model.decode_mask(mask_encode)
-            mask_vae = make_grid(mask_vae, nrow=2) 
-            image = make_grid(self.diffusion_model.rescale(image), nrow=2) 
-            mask = make_grid((mask > 0.5).long(), nrow=2) 
-            mask_pred = make_grid(mask_pred, nrow=2) 
-
-            self.logger.log_image(images=[image], key="test/image") 
-            self.logger.log_image(images=[mask], key="test/mask") 
-            self.logger.log_image(images=[mask_pred], key="test/mask_pred")
-            self.logger.log_image(images=[mask_vae], key="test/mask_vae")
-
-    def configure_optimizers(self):
-        return self.optimizer(params=self.parameters())
     
+    def configure_optimizers(self):
+        return self.optimizer(self.parameters()) 

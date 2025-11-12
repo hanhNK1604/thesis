@@ -22,14 +22,6 @@ vae_model:
   
   kld_weight: 1e-6
 
-  # quantizer: 
-  #   _target_: src.models.vae.components.Quantizer.Quantizer 
-
-  #   num_embeds: 1024
-  #   embed_dim: 3 
-  #   beta: 0.25 
-
-
 optimizer:
   _target_: torch.optim.Adam 
   

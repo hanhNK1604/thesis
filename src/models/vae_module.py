@@ -27,7 +27,7 @@ class VAEModule(L.LightningModule):
         self.res_loss = nn.MSELoss()
         self.feature_loss = nn.MSELoss()
 
-        self.psnr_metric = PeakSignalNoiseRatio() 
+        self.psnr_metric = PeakSignalNoiseRatio(data_range=1.0) 
         self.ssim_metric = StructuralSimilarityIndexMeasure()
 
         self.mean = torch.tensor([0.5, 0.5, 0.5]).unsqueeze(1).unsqueeze(2)
@@ -110,7 +110,7 @@ class VAEModule(L.LightningModule):
         for key in losses.keys(): 
             self.log(f'val/{key}', losses[key].detach(), on_step=False, on_epoch=True) 
 
-        if batch_index == 16:  
+        if batch_index == 4:  
             # random_image = self.sample() 
             # self.logger.log_image(images=[random_image], key='val/random_image')
 
