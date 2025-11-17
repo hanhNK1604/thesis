@@ -6,9 +6,21 @@ from PIL import Image
 import torch 
 from torchvision import transforms 
 
-vae_checkpoint = '/workspace/thesis/checkpoints/fm_latent/isic/epoch=149-step=125400.ckpt'
-vae_module = FlowMatchingLatentModule.load_from_checkpoint(vae_checkpoint) 
-vae_module.eval().freeze() 
+# checkpoint = '/workspace/thesis/checkpoints/fm_latent/isic/epoch=149-step=125400.ckpt'
+# module = FlowMatchingLatentModule.load_from_checkpoint(
+#     checkpoint_path = checkpoint, 
+#     vae_image_path = "/workspace/thesis/checkpoints/vae_image/isic/epoch=249-step=209000.ckpt",
+#     vae_mask_path = "/workspace/thesis/checkpoints/vae_mask/isic/epoch=99-step=83600.ckpt" 
+# ) 
+
+checkpoint = '/workspace/thesis/checkpoints/fm_latent/clinic/epoch=439-step=54121.ckpt'
+module = FlowMatchingLatentModule.load_from_checkpoint(
+    checkpoint_path = checkpoint, 
+    vae_image_path = "/workspace/thesis/checkpoints/vae_image/clinic/epoch=249-step=30750.ckpt",
+    vae_mask_path = "/workspace/thesis/checkpoints/vae_mask/clinic/epoch=199-step=24600.ckpt" 
+) 
+
+module.eval().freeze() 
 
 def response_result(image): 
     transform = transforms.Compose([
@@ -19,8 +31,8 @@ def response_result(image):
 
     image = transform(image).to("cuda")
     image = torch.unsqueeze(image, dim=0) 
-    z_image, _ = vae_module.vae_image_module.vae_model.encode(image)
-    mask_pred = vae_module.sample_n(z_image=z_image, n=5) 
+    z_image, _ = module.vae_image_module.vae_model.encode(image)
+    mask_pred = module.sample_n(z_image=z_image, n=5) 
     mask_pred = mask_pred[0]
     output_image = transforms.ToPILImage()(mask_pred.cpu().float())
     return  output_image

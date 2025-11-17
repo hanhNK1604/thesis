@@ -1,1 +1,1 @@
-rsync -avz -e "ssh -p 23455" /home/ubuntu/thesis  root@116.127.115.18:/workspace
+rsync -avz -e "ssh -p 42293" /home/ubuntu/thesis  root@125.136.64.90:/workspace
