@@ -1,7 +1,7 @@
 _target_: src.data.datamodule.Datamodule
 dataset: 
-  _target_: src.data.dataset.isicfmdataset.ISICFMDataset
-  data_dir: ${paths.data_dir} 
+  _target_: src.data.dataset.diffusiondataset.DiffusionDataset
+  data_dir: ${paths.data_dir}/isic
   
 train_val_test_split: [3344, 100, 250] 
 batch_size: 4

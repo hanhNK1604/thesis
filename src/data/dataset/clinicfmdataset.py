@@ -27,6 +27,7 @@ class ClinicFMDataset(Dataset):
 
         self.transform_label = transforms.Compose([
             transforms.ToTensor(),
+            # transforms.Normalize(mean=(0.5,), std=(0.5,)) 
         ])
     
     def __len__(self): 
@@ -37,15 +38,15 @@ class ClinicFMDataset(Dataset):
         image = Image.open(img_path).convert("RGB")
         image = self.transform_image(image)
 
-        # label_path = os.path.join(self.data_path_label, self.image_files[index]) 
-        # label = Image.open(label_path).convert("L")
-        # label = self.transform_label(label) 
+        label_path = os.path.join(self.data_path_label, self.image_files[index]) 
+        label = Image.open(label_path).convert("L")
+        label = self.transform_label(label) 
 
 
         # print(img_path) 
         # print(label_path)
 
-        return image  
+        return image, label 
     
 
 # data_dir = "/home/ubuntu/thesis/data" 

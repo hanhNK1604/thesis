@@ -28,6 +28,7 @@ class ISICFMDataset(Dataset):
         self.transform_label = transforms.Compose([
             transforms.ToTensor(),
             transforms.Resize((256, 256), antialias=True),
+            # transforms.Normalize(mean=(0.5,), std=(0.5,)) 
         ])
     
     def __len__(self): 
