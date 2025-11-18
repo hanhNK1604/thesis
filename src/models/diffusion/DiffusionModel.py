@@ -245,8 +245,6 @@ class UNet(nn.Module):
             nn.SiLU(inplace=True),  
             nn.Conv2d(in_channels=self.base_channel, out_channels=in_ch, kernel_size=3, padding=1) 
         )
-
-        self.time_embedder = nn.Embedding(num_embeddings=self.time_steps, embedding_dim=self.t_emb_dim) 
     
 
     def position_embeddings(self, t, channels):
@@ -258,7 +256,7 @@ class UNet(nn.Module):
 
 
     def forward(self, x, t, c=None): 
-        t = self.time_embedder(t) + self.position_embeddings(t.view(-1, 1).float().to(x.device), channels=self.t_emb_dim)
+        t = self.position_embeddings(t.view(-1, 1).float().to(x.device), channels=self.t_emb_dim)
         x = self.inp(x)
 
         output_down = [] 
@@ -282,7 +280,7 @@ class UNet(nn.Module):
 class DiffusionModel(nn.Module): 
     def __init__(
         self, 
-        time_steps: int = 50,
+        time_steps: int = 1000,
         cfg_prob: float = 0.5,     
     ): 
         super(DiffusionModel, self).__init__() 
@@ -293,12 +291,13 @@ class DiffusionModel(nn.Module):
             in_ch = 1, 
             t_emb_dim = 256, 
             multiplier = [1, 2, 2, 4], 
+            base_channel = 64, 
             use_attention = True, 
             time_steps = time_steps, 
             ratio = 1
         )
 
-        self.scheduler = DDPMScheduler(num_train_timesteps=self.time_steps, clip_sample=False) 
+        self.scheduler = DDPMScheduler(num_train_timesteps=self.time_steps).eval() 
         self.scheduler.set_timesteps(num_inference_steps=self.time_steps)
 
     
@@ -326,10 +325,52 @@ class DiffusionModel(nn.Module):
             noise_pred_cond = self.denoise_net.forward(x=current_mask, t=t, c=image)
             noise_pred_uncond = self.denoise_net.forward(x=current_mask, t=t, c=None) 
             
-            noise_pred = noise_pred_uncond + cfg_scale * (noise_pred_cond - noise_pred_uncond)
+            # noise_pred = noise_pred_uncond + cfg_scale * (noise_pred_cond - noise_pred_uncond)
+            noise_pred = (cfg_scale + 1) * noise_pred_cond - cfg_scale * noise_pred_uncond
 
             current_mask, _ = self.scheduler.step(model_output=noise_pred, timestep=i, sample=current_mask) 
             
         current_mask = (current_mask + 1.0) / 2.0
-        current_mask = transforms.Resize((256, 256), interpolation=transforms.InterpolationMode.NEAREST)(current_mask) 
+        
         return (torch.clamp(current_mask, min=0, max=1) > 0.5).long()
+    
+# class DiffusionModel(nn.Module): 
+#     def __init__(
+#         self, 
+#         time_steps: int = 1000,    
+#     ): 
+#         super(DiffusionModel, self).__init__() 
+#         self.time_steps = time_steps 
+        
+#         self.denoise_net = UNet(
+#             in_ch = 1, 
+#             t_emb_dim = 256, 
+#             base_channel = 64,
+#             multiplier = [1, 2, 4], 
+#             use_attention = True, 
+#             time_steps = time_steps, 
+#             ratio = 1
+#         )
+
+#         self.scheduler = DDPMScheduler(num_train_timesteps=self.time_steps).eval() 
+#         self.scheduler.set_timesteps(num_inference_steps=self.time_steps) 
+
+#     def forward(self, image): 
+#         noise = torch.randn_like(image, device=image.device) 
+#         t = torch.randint(low=0, high=self.scheduler.num_train_timesteps, size=(image.shape[0],), device=image.device) 
+#         image_t = self.scheduler.add_noise(original_samples=image, noise=noise, timesteps=t) 
+#         noise_pred = self.denoise_net.forward(x=image_t, t=t, c=None) 
+#         return noise_pred, noise 
+    
+#     @torch.no_grad() 
+#     def sample(self): 
+#         current_image = torch.randn(size=(25, 1, 32, 32), device="cuda") 
+#         num_steps_infer = self.scheduler.timesteps
+#         for i in tqdm(num_steps_infer, desc="Sampling"): 
+#             t = (torch.ones(size=(25,), device="cuda") * i).long() 
+#             noise_pred = self.denoise_net.forward(x=current_image, t=t, c=None) 
+#             current_image, _ = self.scheduler.step(model_output=noise_pred, timestep=i, sample=current_image) 
+        
+#         current_image = (current_image + 1.0) / 2.0
+#         current_image = torch.clamp(current_image, 0.0, 1.0) 
+#         return current_image
