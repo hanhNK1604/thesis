@@ -1,0 +1,15 @@
+_target_: src.models.latent_diffusion_module.LatentDiffusionModule
+
+diffusion_model: 
+  _target_: src.models.diffusion.DiffusionModel.LatentDiffusionModel
+  time_steps: 1000
+  cfg_prob: 0.5
+  vae_image_path: ${paths.checkpoints_dir} 
+  vae_mask_path: ${paths.checkpoints_dir}
+
+optimizer:
+  _target_: torch.optim.Adam 
+  
+  _partial_: True
+  lr: 1e-5
+cfg_scale: 4.0 

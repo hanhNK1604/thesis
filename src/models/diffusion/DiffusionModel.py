@@ -7,8 +7,8 @@ from torchvision import transforms
 from generative.networks.schedulers import DDIMScheduler, DDPMScheduler
 from tqdm import tqdm 
 
-from torch import nn
-import torch
+from src.models.vae_module import VAEModule 
+from src.models.vae_mask_module import VAEMaskModule 
 
 class ResBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
@@ -334,43 +334,73 @@ class DiffusionModel(nn.Module):
         
         return (torch.clamp(current_mask, min=0, max=1) > 0.5).long()
     
-# class DiffusionModel(nn.Module): 
-#     def __init__(
-#         self, 
-#         time_steps: int = 1000,    
-#     ): 
-#         super(DiffusionModel, self).__init__() 
-#         self.time_steps = time_steps 
-        
-#         self.denoise_net = UNet(
-#             in_ch = 1, 
-#             t_emb_dim = 256, 
-#             base_channel = 64,
-#             multiplier = [1, 2, 4], 
-#             use_attention = True, 
-#             time_steps = time_steps, 
-#             ratio = 1
-#         )
 
-#         self.scheduler = DDPMScheduler(num_train_timesteps=self.time_steps).eval() 
-#         self.scheduler.set_timesteps(num_inference_steps=self.time_steps) 
 
-#     def forward(self, image): 
-#         noise = torch.randn_like(image, device=image.device) 
-#         t = torch.randint(low=0, high=self.scheduler.num_train_timesteps, size=(image.shape[0],), device=image.device) 
-#         image_t = self.scheduler.add_noise(original_samples=image, noise=noise, timesteps=t) 
-#         noise_pred = self.denoise_net.forward(x=image_t, t=t, c=None) 
-#         return noise_pred, noise 
+class LatentDiffusionModel(nn.Module):
+    def __init__(
+        self, 
+        time_steps: int = 1000, 
+        cfg_prob: float = 0.5, 
+        vae_image_path: str = "path", 
+        vae_mask_path: str = "path"
+    ): 
+        super(LatentDiffusionModel, self).__init__() 
+        self.time_steps = time_steps 
+        self.cfg_prob = cfg_prob 
+        self.vae_image_module = VAEModule.load_from_checkpoint(vae_image_path) 
+        self.vae_mask_module = VAEMaskModule.load_from_checkpoint(vae_mask_path) 
+        self.vae_image_module.eval().freeze() 
+        self.vae_mask_module.eval().freeze() 
+
+        self.denoise_net = UNet(
+            in_ch = 3, 
+            t_emb_dim = 256, 
+            base_channel = 64, 
+            multiplier = [1, 2, 2, 4], 
+            use_attention = True, 
+            ratio = 1
+        )
+
+        self.scheduler = DDPMScheduler(num_train_timesteps=self.time_steps, clip_sample=True).eval() 
+        self.scheduler.set_timesteps(num_inference_steps=self.time_steps) 
     
-#     @torch.no_grad() 
-#     def sample(self): 
-#         current_image = torch.randn(size=(25, 1, 32, 32), device="cuda") 
-#         num_steps_infer = self.scheduler.timesteps
-#         for i in tqdm(num_steps_infer, desc="Sampling"): 
-#             t = (torch.ones(size=(25,), device="cuda") * i).long() 
-#             noise_pred = self.denoise_net.forward(x=current_image, t=t, c=None) 
-#             current_image, _ = self.scheduler.step(model_output=noise_pred, timestep=i, sample=current_image) 
-        
-#         current_image = (current_image + 1.0) / 2.0
-#         current_image = torch.clamp(current_image, 0.0, 1.0) 
-#         return current_image
+    def encode_image(self, image: torch.Tensor): 
+        z_image, _ = self.vae_image_module.vae_model.encode(image)
+        return z_image 
+    
+    def encode_mask(self, mask: torch.Tensor): 
+        z_mask, _ = self.vae_mask_module.vae_model.encode(mask) 
+        return z_mask 
+    
+    def forward(self, z_image: torch.Tensor, z_mask: torch.Tensor): 
+        noise = torch.randn_like(z_mask, device=z_mask.device) 
+        t = torch.randint(low=0, high=self.time_steps, size=(z_mask.shape[0],), device=z_mask.device) 
+        z_mask_t = self.scheduler.add_noise(original_samples=z_mask, noise=noise, timesteps=t) 
+
+        if torch.rand(1) > self.cfg_prob: 
+            noise_pred = self.denoise_net.forward(x=z_mask_t, t=t, c=z_image) 
+        else: 
+            noise_pred = self.denoise_net.forward(x=z_mask_t, t=t, c=None) 
+
+        return noise_pred, noise 
+
+    @torch.no_grad() 
+    def sample(self, z_image: torch.Tensor, cfg_scale: float = 4.0): 
+        current_z_mask = torch.randn_like(z_image, device=z_image.device) 
+        num_steps_infer = self.scheduler.timesteps
+        for i in tqdm(num_steps_infer, desc="Sampling"): 
+            t = (torch.ones(size=(z_image.shape[0],), device=z_image.device) * i).long()
+
+            noise_pred_cond = self.denoise_net.forward(x=current_z_mask, t=t, c=z_image)
+            noise_pred_uncond = self.denoise_net.forward(x=current_z_mask, t=t, c=None) 
+            
+            # noise_pred = noise_pred_uncond + cfg_scale * (noise_pred_cond - noise_pred_uncond)
+            noise_pred = (cfg_scale + 1) * noise_pred_cond - cfg_scale * noise_pred_uncond
+
+            current_z_mask, _ = self.scheduler.step(model_output=noise_pred, timestep=i, sample=current_z_mask) 
+            
+    
+        mask_pred = self.vae_mask_module.vae_model.decode(current_z_mask) 
+        mask_pred = torch.sigmoid(mask_pred) 
+        mask_pred = (mask_pred > 0.5).long()
+        return mask_pred 
