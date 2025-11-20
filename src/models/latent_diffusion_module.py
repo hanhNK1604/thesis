@@ -59,13 +59,13 @@ class LatentDiffusionModule(L.LightningModule):
         loss = self.loss_fn(noise_pred, noise) 
         self.log('val/loss', loss, on_epoch=True, on_step=False, prog_bar=True) 
 
-        if batch_index == 16: 
+        if batch_index == 4: 
             mask_pred = self.diffusion_model.sample(z_image=z_image, cfg_scale=self.cfg_scale) 
             mask_pred_n = self.sample_n(z_image=z_image, n=5)
             mask_vae = self.diffusion_model.vae_mask_module.vae_model.decode(z_mask) 
             mask_vae = (torch.sigmoid(mask_vae) > 0.5).long()
             image_vae = self.diffusion_model.vae_image_module.vae_model.decode(z_image) 
-            image_vae = torch.clamp(self.rescale(image=image), 0, 1)
+            image_vae = torch.clamp(self.rescale(image=image_vae), 0, 1)
             image = self.rescale(image) 
 
             mask_pred = make_grid(mask_pred, nrow=2) 
@@ -99,11 +99,11 @@ class LatentDiffusionModule(L.LightningModule):
         iou_n = self.iou(mask_pred_n, (mask > 0.5).long()) 
         self.log('test/iou_n', iou_n, on_epoch=True, on_step=False, prog_bar=True)
         
-        if batch_index == 16: 
+        if batch_index == 4: 
             mask_vae = self.diffusion_model.vae_mask_module.vae_model.decode(z_mask) 
             mask_vae = (torch.sigmoid(mask_vae) > 0.5).long()
             image_vae = self.diffusion_model.vae_image_module.vae_model.decode(z_image) 
-            image_vae = torch.clamp(self.rescale(image=image), 0, 1)
+            image_vae = torch.clamp(self.rescale(image=image_vae), 0, 1)
             image = self.rescale(image) 
 
             mask_pred = make_grid(mask_pred, nrow=2) 
@@ -113,12 +113,12 @@ class LatentDiffusionModule(L.LightningModule):
             mask = make_grid((mask > 0.5).long(), nrow=2) 
             image = make_grid(image, nrow=2) 
 
-            self.logger.log_image(images=[mask_pred], key='val/mask_pred')
-            self.logger.log_image(images=[mask_pred_n], key='val/mask_pred_n') 
-            self.logger.log_image(images=[mask_vae], key='val/mask_vae') 
-            self.logger.log_image(images=[image_vae], key='val/image_vae') 
-            self.logger.log_image(images=[mask], key='val/mask') 
-            self.logger.log_image(images=[image], key='val/image') 
+            self.logger.log_image(images=[mask_pred], key='test/mask_pred')
+            self.logger.log_image(images=[mask_pred_n], key='test/mask_pred_n') 
+            self.logger.log_image(images=[mask_vae], key='test/mask_vae') 
+            self.logger.log_image(images=[image_vae], key='test/image_vae') 
+            self.logger.log_image(images=[mask], key='test/mask') 
+            self.logger.log_image(images=[image], key='test/image') 
 
 
     def sample_n(self, z_image: torch.Tensor, n: int = 5): 

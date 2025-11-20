@@ -21,7 +21,8 @@ class DiffusionDataset(Dataset):
         self.image_files = os.listdir(self.data_path_image)
 
         self.transform_image_original = transforms.Compose([
-            transforms.ToTensor()             
+            transforms.ToTensor(), 
+            transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))    
         ])
         self.transform_image_resize = transforms.Compose([
             transforms.ToTensor(), 
